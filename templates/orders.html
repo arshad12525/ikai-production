@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orders — Ikai Production</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#FAF7F0;--panel:#FFFFFF;--panel-alt:#F3EEE1;--ink:#2B2620;--muted:#8A8272;--primary:#1F3D2B;--primary-light:#2F5A3E;--accent:#C89B3C;--accent-dark:#A87F2A;--sage:#7C9473;--danger:#B5533C;--danger-bg:#F7E7E1;--success:#5C7A44;--success-bg:#EAF0E1;--border:#E4DCC8;--radius:10px;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;}
+.layout{display:flex;min-height:100vh;}
+.sidebar{width:230px;background:var(--primary);color:#EFE9D8;flex-shrink:0;display:flex;flex-direction:column;padding:24px 0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.sidebar .brand{font-family:'Fraunces',serif;font-size:22px;font-weight:700;padding:0 24px 24px;border-bottom:1px solid rgba(239,233,216,0.15);margin-bottom:16px;}
+.sidebar .brand span{display:block;font-family:'Inter',sans-serif;font-size:11px;font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-top:4px;}
+.sidebar nav{display:flex;flex-direction:column;gap:2px;flex:1;}
+.sidebar nav a{color:#D9D2BC;text-decoration:none;padding:11px 24px;font-size:13.5px;border-left:3px solid transparent;}
+.sidebar nav a:hover{background:rgba(255,255,255,0.06);color:#fff;}
+.sidebar nav a.active{background:rgba(255,255,255,0.08);color:#fff;border-left-color:var(--accent);font-weight:600;}
+.sidebar .userbox{padding:16px 24px 0;border-top:1px solid rgba(239,233,216,0.15);margin-top:12px;}
+.sidebar .userbox .name{font-weight:600;font-size:13px;color:#fff;}
+.sidebar .userbox .role{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;}
+.sidebar .userbox a{display:inline-block;margin-top:10px;color:#D9D2BC;font-size:12.5px;text-decoration:underline;}
+.main{flex:1;padding:32px 40px;max-width:1200px;}
+.pagehead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
+.pagehead h1{font-family:'Fraunces',serif;font-size:28px;margin:0;font-weight:600;}
+.pagehead p{margin:4px 0 0;color:var(--muted);font-size:13.5px;}
+.flash{padding:12px 16px;border-radius:var(--radius);margin-bottom:18px;font-size:13.5px;font-weight:500;}
+.flash.success{background:var(--success-bg);color:var(--success);border:1px solid #cfe0bd;}
+.flash.error{background:var(--danger-bg);color:var(--danger);border:1px solid #edc7b9;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:22px;}
+.card h2{font-family:'Fraunces',serif;font-size:17px;margin:0 0 16px;font-weight:600;}
+.grid-2{display:grid;grid-template-columns:1fr 1.4fr;gap:22px;}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px;}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;}
+.stat .num{font-family:'Fraunces',serif;font-size:30px;font-weight:600;color:var(--primary);}
+.stat .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
+.stat.warn .num{color:var(--danger);}
+form .field{margin-bottom:14px;}
+form label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:7px;font-family:'Inter',sans-serif;font-size:13.5px;background:#fff;color:var(--ink);}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);}
+.btn{display:inline-block;background:var(--primary);color:#fff;border:none;padding:10px 20px;border-radius:7px;font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;}
+.btn:hover{background:var(--primary-light);}
+.btn.accent{background:var(--accent);color:#3A2A0C;}
+.btn.accent:hover{background:var(--accent-dark);color:#fff;}
+.btn.pass{background:var(--success);}
+.btn.fail{background:var(--danger);}
+.btn.small{padding:6px 12px;font-size:12.5px;}
+.btn.ghost{background:var(--panel-alt);color:var(--ink);border:1px solid var(--border);}
+.btn.ghost:hover{background:#ECE4D0;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:9px 10px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);}
+td{padding:10px 10px;border-bottom:1px solid var(--border);}
+tr:last-child td{border-bottom:none;}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;}
+.badge.pending{background:#F3EEE1;color:var(--muted);}
+.badge.passed,.badge.received{background:var(--success-bg);color:var(--success);}
+.badge.failed{background:var(--danger-bg);color:var(--danger);}
+.badge.low{background:var(--danger-bg);color:var(--danger);}
+.badge.partially_received{background:#F3EEE1;color:var(--accent-dark);}
+.badge.cancelled{background:var(--danger-bg);color:var(--danger);}
+.empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
+.hint{font-size:12px;color:var(--muted);margin-top:4px;}
+
+/* --- Multi-item order form --- */
+#order-items-table{margin-bottom:10px;}
+#order-items-table th{padding:6px 8px;}
+#order-items-table td{padding:6px 8px;vertical-align:middle;}
+.order-item-row select,.order-item-row input{margin:0;}
+.remove-row-btn{background:var(--danger-bg);color:var(--danger);border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;}
+.remove-row-btn:hover{background:#f0d3c5;}
+
+/* --- Searchable material combobox --- */
+.combo{position:relative;min-width:200px;}
+.combo input.combo-input{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:7px;font-family:'Inter',sans-serif;font-size:13.5px;background:#fff;color:var(--ink);}
+.combo input.combo-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);}
+.combo-list{display:none;position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:0;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:7px;box-shadow:0 6px 20px rgba(43,38,32,0.12);}
+.combo-list.open{display:block;}
+.combo-option{padding:9px 12px;font-size:13.5px;cursor:pointer;color:var(--ink);}
+.combo-option:hover,.combo-option.highlighted{background:var(--panel-alt);}
+.combo-option.no-match{color:var(--muted);cursor:default;font-style:italic;}
+.combo-option.no-match:hover{background:transparent;}
+
+/* --- Grouped order cards --- */
+.order-group-card{border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:14px;background:var(--panel-alt);}
+.order-group-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
+.order-group-head .vendor{font-weight:700;font-family:'Fraunces',serif;font-size:15px;}
+.order-group-head .date{color:var(--muted);font-size:12.5px;margin-left:8px;}
+.order-group-card table{background:#fff;border-radius:6px;overflow:hidden;}
+.cancel-form{display:inline;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="brand">Ikai Production<span>Batch &amp; Stock</span></div>
+    <nav>
+    {% set links_admin = [
+        ('admin_dashboard','Dashboard'), ('vendors','Vendors'), ('raw_materials','Raw Materials'),
+        ('finished_products','Finished Products'), ('bom','Recipes (BOM)'), ('orders','Orders'),
+        ('receive','Receive Stock'), ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+      ] %}
+      {% set links_store = [
+        ('warehouse_dashboard','Dashboard'), ('raw_materials','Raw Materials'), ('bom','Recipes (BOM)'),
+        ('orders','Orders'), ('receive','Receive Stock'),
+        ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+      ] %}
+      {% set nav_links = links_admin if session.role == 'admin' else links_store %}
+      {% for endpoint, label in nav_links %}
+      <a href="{{ url_for(endpoint) }}" class="{{ 'active' if request.endpoint == endpoint else '' }}">{{ label }}</a>
+      {% endfor %}
+
+    </nav>
+    <div class="userbox">
+      <div class="name">{{ session.full_name or session.username }}</div>
+      <div class="role">{{ 'Admin' if session.role == 'admin' else 'Warehouse' }}</div>
+      <a href="{{ url_for('logout') }}">Sign out</a>
+    </div>
+  </div>
+  <div class="main">
+    <div class="pagehead">
+      <div><h1>Raw Material Orders</h1><p>Record what you've ordered from a vendor, before it arrives. One order can include several materials.</p></div>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>Place Order</h2>
+        <form method="POST">
+          <div class="field"><label>Vendor</label>
+            <select name="vendor_id" required>
+              <option value="">Select vendor…</option>
+              {% for v in vendors %}<option value="{{ v.id }}">{{ v.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="field"><label>Order Date</label><input type="date" name="order_date" value="{{ today }}" required></div>
+
+          <label>Items</label>
+          <table id="order-items-table">
+            <thead><tr><th>Raw Material</th><th style="width:120px;">Qty</th><th></th></tr></thead>
+            <tbody id="order-items-body"></tbody>
+          </table>
+          <button type="button" class="btn small ghost" onclick="addOrderItemRow()">+ Add another item</button>
+
+          <div class="field" style="margin-top:14px;"><label>Notes (optional)</label><textarea name="notes" rows="2"></textarea></div>
+          <button class="btn accent" type="submit">Place Order</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Recent Orders</h2>
+        {% if order_groups %}
+          {% for group in order_groups %}
+          <div class="order-group-card">
+            <div class="order-group-head">
+              <div>
+                <span class="vendor">{{ group.vendor_name }}</span>
+                <span class="date">{{ group.order_date }}</span>
+              </div>
+              {% set pending_items = group.order_items|selectattr('status','equalto','pending')|list %}
+              {% if pending_items|length == group.order_items|length %}
+              <form class="cancel-form" method="POST" action="{{ url_for('cancel_order_group', group_key=group.group_key) }}"
+                    onsubmit="return confirm('Cancel this entire order? This cannot be undone.');">
+                <button class="btn small fail" type="submit">Cancel Order</button>
+              </form>
+              {% endif %}
+            </div>
+            <table>
+              <tr><th>Material</th><th>Qty</th><th>Status</th><th></th></tr>
+              {% for o in group.order_items %}
+              <tr>
+                <td>{{ o.material_name }}</td>
+                <td>{{ o.qty_ordered }} {{ o.unit }}</td>
+                <td><span class="badge {{ o.status }}">{{ o.status.replace('_',' ') }}</span></td>
+                <td style="white-space:nowrap;">
+                  {% if o.status == 'pending' %}
+                  <form class="cancel-form" method="POST" action="{{ url_for('cancel_order', order_id=o.id) }}"
+                        onsubmit="return confirm('Cancel this item?');">
+                    <button class="btn small ghost" type="submit">Cancel</button>
+                  </form>
+                  {% endif %}
+                  {% if session.role == 'admin' %}
+                  <form class="cancel-form" method="POST" action="{{ url_for('delete_order', order_id=o.id) }}"
+                        onsubmit="return confirm('Permanently delete this order item? This can\'t be undone. Items that already have a receipt linked can\'t be deleted this way — delete the receipt first from Receive Stock.');">
+                    <button class="btn small fail" type="submit">Delete</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </table>
+            {% if group.notes %}<div class="hint" style="margin-top:8px;">{{ group.notes }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        {% else %}<div class="empty">No orders placed yet.</div>{% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+<script>
+const ORDER_MATERIALS = [
+  {% for m in materials %}{ id: {{ m.id }}, label: {{ (m.name ~ ' (' ~ m.unit ~ ')')|tojson }} },{% endfor %}
+];
+let orderRowCounter = 0;
+
+function addOrderItemRow() {
+  orderRowCounter++;
+  const tr = document.createElement('tr');
+  tr.className = 'order-item-row';
+  tr.innerHTML = `
+    <td>
+      <div class="combo">
+        <input type="text" class="combo-input" placeholder="Type to search a raw material…" autocomplete="off" required>
+        <input type="hidden" name="raw_material_id[]">
+        <div class="combo-list"></div>
+      </div>
+    </td>
+    <td><input type="number" step="0.001" min="0.001" name="qty_ordered[]" required></td>
+    <td><button type="button" class="remove-row-btn" onclick="removeOrderItemRow(this)">✕</button></td>
+  `;
+  document.getElementById('order-items-body').appendChild(tr);
+  initMaterialCombo(tr.querySelector('.combo'));
+}
+
+function removeOrderItemRow(btn) {
+  const tbody = document.getElementById('order-items-body');
+  if (tbody.querySelectorAll('.order-item-row').length > 1) {
+    btn.closest('.order-item-row').remove();
+  }
+}
+
+function initMaterialCombo(wrap) {
+  const input = wrap.querySelector('.combo-input');
+  const hidden = wrap.querySelector('input[type="hidden"]');
+  const list = wrap.querySelector('.combo-list');
+  let highlighted = -1;
+
+  function renderOptions(filterText) {
+    list.innerHTML = '';
+    const q = filterText.trim().toLowerCase();
+    const matches = ORDER_MATERIALS.filter(function(m) {
+      return !q || m.label.toLowerCase().indexOf(q) !== -1;
+    });
+    if (matches.length === 0) {
+      const div = document.createElement('div');
+      div.className = 'combo-option no-match';
+      div.textContent = 'No matching option';
+      list.appendChild(div);
+      return [];
+    }
+    matches.forEach(function(m) {
+      const div = document.createElement('div');
+      div.className = 'combo-option';
+      div.textContent = m.label;
+      div.dataset.id = m.id;
+      div.addEventListener('click', function() { selectOption(m); });
+      list.appendChild(div);
+    });
+    return matches;
+  }
+
+  function selectOption(m) {
+    input.value = m.label;
+    hidden.value = m.id;
+    hideList();
+  }
+
+  function showList() {
+    renderOptions(input.value);
+    list.classList.add('open');
+    highlighted = -1;
+  }
+
+  function hideList() {
+    list.classList.remove('open');
+    highlighted = -1;
+  }
+
+  input.addEventListener('focus', function() { showList(); input.select(); });
+  input.addEventListener('input', function() { hidden.value = ''; showList(); });
+
+  input.addEventListener('keydown', function(e) {
+    const options = Array.prototype.slice.call(list.querySelectorAll('.combo-option:not(.no-match)'));
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      highlighted = Math.min(highlighted + 1, options.length - 1);
+      options.forEach(function(o, i) { o.classList.toggle('highlighted', i === highlighted); });
+      if (options[highlighted]) options[highlighted].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      highlighted = Math.max(highlighted - 1, 0);
+      options.forEach(function(o, i) { o.classList.toggle('highlighted', i === highlighted); });
+      if (options[highlighted]) options[highlighted].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlighted >= 0 && options[highlighted]) {
+        const m = ORDER_MATERIALS.find(function(x) { return String(x.id) === options[highlighted].dataset.id; });
+        if (m) selectOption(m);
+      }
+    } else if (e.key === 'Escape') {
+      hideList();
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!wrap.contains(e.target)) hideList();
+  });
+
+  const form = wrap.closest('form');
+  if (form) {
+    form.addEventListener('submit', function(e) {
+      if (!hidden.value) {
+        e.preventDefault();
+        input.style.borderColor = 'var(--danger)';
+        input.placeholder = 'Please pick a material from the list';
+        input.value = '';
+        input.focus();
+      }
+    });
+  }
+}
+
+// Start with one item row
+addOrderItemRow();
+</script>
+</body>
+</html>

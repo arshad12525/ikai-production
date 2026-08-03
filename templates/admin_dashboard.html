@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Ikai Production</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#FAF7F0;--panel:#FFFFFF;--panel-alt:#F3EEE1;--ink:#2B2620;--muted:#8A8272;--primary:#1F3D2B;--primary-light:#2F5A3E;--accent:#C89B3C;--accent-dark:#A87F2A;--sage:#7C9473;--danger:#B5533C;--danger-bg:#F7E7E1;--success:#5C7A44;--success-bg:#EAF0E1;--border:#E4DCC8;--radius:10px;}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-serif;font-size:14px;}
+.layout{display:flex;min-height:100vh;}
+.sidebar{width:230px;background:var(--primary);color:#EFE9D8;flex-shrink:0;display:flex;flex-direction:column;padding:24px 0;position:sticky;top:0;height:100vh;overflow-y:auto;}
+.sidebar .brand{font-family:'Fraunces',serif;font-size:22px;font-weight:700;padding:0 24px 24px;border-bottom:1px solid rgba(239,233,216,0.15);margin-bottom:16px;}
+.sidebar .brand span{display:block;font-family:'Inter',sans-serif;font-size:11px;font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-top:4px;}
+.sidebar nav{display:flex;flex-direction:column;gap:2px;flex:1;}
+.sidebar nav a{color:#D9D2BC;text-decoration:none;padding:11px 24px;font-size:13.5px;border-left:3px solid transparent;}
+.sidebar nav a:hover{background:rgba(255,255,255,0.06);color:#fff;}
+.sidebar nav a.active{background:rgba(255,255,255,0.08);color:#fff;border-left-color:var(--accent);font-weight:600;}
+.sidebar .userbox{padding:16px 24px 0;border-top:1px solid rgba(239,233,216,0.15);margin-top:12px;}
+.sidebar .userbox .name{font-weight:600;font-size:13px;color:#fff;}
+.sidebar .userbox .role{font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;}
+.sidebar .userbox a{display:inline-block;margin-top:10px;color:#D9D2BC;font-size:12.5px;text-decoration:underline;}
+.main{flex:1;padding:32px 40px;max-width:1200px;}
+.pagehead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;flex-wrap:wrap;gap:12px;}
+.pagehead h1{font-family:'Fraunces',serif;font-size:28px;margin:0;font-weight:600;}
+.pagehead p{margin:4px 0 0;color:var(--muted);font-size:13.5px;}
+.flash{padding:12px 16px;border-radius:var(--radius);margin-bottom:18px;font-size:13.5px;font-weight:500;}
+.flash.success{background:var(--success-bg);color:var(--success);border:1px solid #cfe0bd;}
+.flash.error{background:var(--danger-bg);color:var(--danger);border:1px solid #edc7b9;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:22px;margin-bottom:22px;}
+.card h2{font-family:'Fraunces',serif;font-size:17px;margin:0 0 16px;font-weight:600;}
+.grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:22px;}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px;}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;}
+.stat .num{font-family:'Fraunces',serif;font-size:30px;font-weight:600;color:var(--primary);}
+.stat .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
+.stat.warn .num{color:var(--danger);}
+.btn{display:inline-block;background:var(--primary);color:#fff;border:none;padding:10px 20px;border-radius:7px;font-size:13.5px;font-weight:600;cursor:pointer;text-decoration:none;}
+.btn:hover{background:var(--primary-light);}
+.btn.accent{background:var(--accent);color:#3A2A0C;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:9px 10px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);}
+td{padding:10px 10px;border-bottom:1px solid var(--border);}
+tr:last-child td{border-bottom:none;}
+.badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;}
+.badge.low{background:var(--danger-bg);color:var(--danger);}
+.empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
+.steps{display:flex;gap:0;margin-bottom:0;flex-wrap:wrap;}
+.steps .step{flex:1;min-width:130px;background:var(--panel-alt);border:1px solid var(--border);padding:14px 16px;}
+.steps .step .n{font-family:'Fraunces',serif;color:var(--accent-dark);font-size:12px;font-weight:700;}
+.steps .step .t{font-weight:600;font-size:13px;margin-top:3px;}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="brand">Ikai Production<span>Batch &amp; Stock</span></div>
+    <nav>
+      <a href="{{ url_for('admin_dashboard') }}" class="active">Dashboard</a>
+      <a href="{{ url_for('vendors') }}">Vendors</a>
+      <a href="{{ url_for('raw_materials') }}">Raw Materials</a>
+      <a href="{{ url_for('finished_products') }}">Finished Products</a>
+      <a href="{{ url_for('bom') }}">Recipes (BOM)</a>
+      <a href="{{ url_for('orders') }}">Orders</a>
+      <a href="{{ url_for('receive') }}">Receive Stock</a>
+      <a href="{{ url_for('qc') }}">Quality Check</a>
+      <a href="{{ url_for('production') }}">Production</a>
+      <a href="{{ url_for('stock_ledger') }}">Stock Ledger</a>
+    </nav>
+    <div class="userbox">
+      <div class="name">{{ session.full_name or session.username }}</div>
+      <div class="role">Admin</div>
+      <a href="{{ url_for('logout') }}">Sign out</a>
+    </div>
+  </div>
+  <div class="main">
+    <div class="pagehead">
+      <div>
+        <h1>Dashboard</h1>
+        <p>Overview of raw materials, quality checks and production.</p>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">{{ rm_count }}</div><div class="label">Raw Materials</div></div>
+      <div class="stat"><div class="num">{{ fp_count }}</div><div class="label">Finished Products</div></div>
+      <div class="stat {{ 'warn' if pending_qc > 0 else '' }}"><div class="num">{{ pending_qc }}</div><div class="label">Pending QC</div></div>
+      <div class="stat"><div class="num">{{ open_orders }}</div><div class="label">Open Orders</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Workflow</h2>
+      <div class="steps">
+        <div class="step"><div class="n">01</div><div class="t">Order raw material</div></div>
+        <div class="step"><div class="n">02</div><div class="t">Receive with batch no.</div></div>
+        <div class="step"><div class="n">03</div><div class="t">Quality check pass/fail</div></div>
+        <div class="step"><div class="n">04</div><div class="t">Production auto-deducts stock</div></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>Recent Production</h2>
+        {% if recent_production %}
+        <table>
+          <tr><th>Batch Code</th><th>Product</th><th>Qty</th><th>Date</th></tr>
+          {% for p in recent_production %}
+          <tr>
+            <td><a href="{{ url_for('production_trace', batch_id=p.id) }}">{{ p.batch_code }}</a></td>
+            <td>{{ p.product_name }}</td>
+            <td>{{ p.qty_produced }} {{ p.unit }}</td>
+            <td>{{ p.production_date }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div class="empty">No production recorded yet.</div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Low Stock Alerts</h2>
+        {% if low_stock %}
+        <table>
+          <tr><th>Material</th><th>Stock</th><th>Reorder At</th></tr>
+          {% for m in low_stock %}
+          <tr>
+            <td>{{ m.name }}</td>
+            <td><span class="badge low">{{ m.current_stock }} {{ m.unit }}</span></td>
+            <td>{{ m.reorder_level }} {{ m.unit }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div class="empty">All raw materials are above reorder level.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
