@@ -72,12 +72,12 @@ tr:last-child td{border-bottom:none;}
     {% set links_admin = [
         ('admin_dashboard','Dashboard'), ('vendors','Vendors'), ('raw_materials','Raw Materials'),
         ('finished_products','Finished Products'), ('bom','Recipes (BOM)'), ('orders','Orders'),
-        ('receive','Receive Stock'), ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+        ('receive','Receive Stock'), ('qc','Quality Check'), ('production','Production'), ('dispatch','Dispatch'), ('stock_ledger','Stock Ledger')
       ] %}
       {% set links_store = [
     ('warehouse_dashboard','Dashboard'), ('raw_materials','Raw Materials'), ('bom','Recipes (BOM)'),
     ('orders','Orders'), ('receive','Receive Stock'),
-    ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+    ('qc','Quality Check'), ('production','Production'), ('dispatch','Dispatch'), ('stock_ledger','Stock Ledger')
   ] %}
       {% set nav_links = links_admin if session.role == 'admin' else links_store %}
       {% for endpoint, label in nav_links %}

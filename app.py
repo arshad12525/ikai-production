@@ -126,11 +126,16 @@ def admin_dashboard():
                             JOIN finished_products fp ON fp.id = pb.finished_product_id
                             ORDER BY pb.created_at DESC LIMIT 8""")
             recent_production = cur.fetchall()
+            cur.execute("""SELECT d.*, fp.name AS product_name, fp.unit FROM dispatches d
+                            JOIN finished_products fp ON fp.id = d.finished_product_id
+                            ORDER BY d.created_at DESC LIMIT 8""")
+            recent_dispatches = cur.fetchall()
     finally:
         db.close()
     return render_template('admin_dashboard.html', rm_count=rm_count, fp_count=fp_count,
                             pending_qc=pending_qc, open_orders=open_orders,
-                            low_stock=low_stock, recent_production=recent_production)
+                            low_stock=low_stock, recent_production=recent_production,
+                            recent_dispatches=recent_dispatches)
 
 
 @app.route('/warehouse/dashboard')
@@ -976,6 +981,150 @@ def production_trace(batch_id):
     finally:
         db.close()
     return render_template('trace.html', batch=batch, consumption=consumption)
+
+
+# ---------------------------------------------------------------------
+# Dispatch (finished goods going out to a customer)
+#   Deducts finished_products.current_stock immediately and writes a
+#   stock_ledger entry. Several products dispatched to the same customer
+#   on the same date are saved together and share a dispatch_group_id,
+#   same pattern as Orders and Receive Stock.
+# ---------------------------------------------------------------------
+@app.route('/dispatch', methods=['GET', 'POST'])
+@role_required('admin', 'store')
+def dispatch():
+    db = get_db()
+    try:
+        if request.method == 'POST':
+            customer_name = request.form.get('customer_name', '').strip()
+            dispatch_date = request.form['dispatch_date']
+            notes = request.form.get('notes', '')
+            product_ids = request.form.getlist('finished_product_id[]')
+            qtys = request.form.getlist('qty_dispatched[]')
+            batch_nos = request.form.getlist('batch_no[]')
+
+            if not customer_name:
+                flash('Enter who this dispatch is going to.', 'error')
+                return redirect(url_for('dispatch'))
+
+            items = []
+            for pid, qty, bno in zip(product_ids, qtys, batch_nos):
+                if not pid or not qty:
+                    continue
+                qty_f = float(qty)
+                if qty_f <= 0:
+                    continue
+                items.append((int(pid), qty_f, bno.strip() or None))
+
+            if not items:
+                flash('Add at least one item with a valid quantity.', 'error')
+                return redirect(url_for('dispatch'))
+
+            try:
+                with db.cursor() as cur:
+                    # Validate stock availability up front so a partial group
+                    # never gets committed.
+                    for fp_id, qty_f, bno in items:
+                        cur.execute("SELECT * FROM finished_products WHERE id=%s FOR UPDATE", (fp_id,))
+                        fp = cur.fetchone()
+                        if not fp:
+                            raise ValueError('One of the selected products was not found.')
+                        if qty_f > float(fp['current_stock']):
+                            raise ValueError(
+                                f"Cannot dispatch {qty_f} {fp['unit']} of {fp['name']} \u2014 only "
+                                f"{fp['current_stock']} {fp['unit']} currently in stock.")
+
+                    group_id = uuid.uuid4().hex
+                    for fp_id, qty_f, bno in items:
+                        cur.execute("""INSERT INTO dispatches
+                                        (dispatch_group_id, finished_product_id, qty_dispatched, customer_name,
+                                         batch_no, dispatch_date, dispatched_by, notes)
+                                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                                    (group_id, fp_id, qty_f, customer_name, bno, dispatch_date,
+                                     session['user_id'], notes))
+                        dispatch_id = cur.lastrowid
+
+                        cur.execute("UPDATE finished_products SET current_stock = current_stock - %s WHERE id=%s",
+                                    (qty_f, fp_id))
+                        cur.execute("SELECT name, unit, current_stock FROM finished_products WHERE id=%s", (fp_id,))
+                        fp_after = cur.fetchone()
+                        cur.execute("""INSERT INTO stock_ledger
+                                        (item_type, item_id, transaction_type, qty, reference_type, reference_id,
+                                         balance_after, remarks, created_by)
+                                        VALUES ('finished_product', %s, 'out', %s, 'dispatch', %s, %s, %s, %s)""",
+                                    (fp_id, qty_f, dispatch_id, fp_after['current_stock'],
+                                     f"Dispatched to {customer_name}", session['user_id']))
+                db.commit()
+                flash(f'{len(items)} item(s) dispatched to {customer_name}.', 'success')
+            except ValueError as e:
+                db.rollback()
+                flash(str(e), 'error')
+            return redirect(url_for('dispatch'))
+
+        with db.cursor() as cur:
+            cur.execute("SELECT * FROM finished_products ORDER BY name")
+            products = cur.fetchall()
+            cur.execute("""SELECT d.*, fp.name AS product_name, fp.unit FROM dispatches d
+                            JOIN finished_products fp ON fp.id = d.finished_product_id
+                            ORDER BY d.created_at DESC LIMIT 100""")
+            dispatch_rows = cur.fetchall()
+    finally:
+        db.close()
+
+    # Group dispatch lines saved together (same dispatch_group_id) into one card,
+    # same pattern as Orders / Receive Stock.
+    groups_by_key = {}
+    dispatch_groups = []
+    for d in dispatch_rows:
+        key = d['dispatch_group_id'] or f"single-{d['id']}"
+        if key not in groups_by_key:
+            g = {
+                'group_key': key,
+                'customer_name': d['customer_name'],
+                'dispatch_date': d['dispatch_date'],
+                'created_at': d['created_at'],
+                'notes': d['notes'],
+                'lines': [],
+            }
+            groups_by_key[key] = g
+            dispatch_groups.append(g)
+        groups_by_key[key]['lines'].append(d)
+
+    dispatch_groups.sort(key=lambda g: g['created_at'], reverse=True)
+
+    return render_template('dispatch.html', products=products, dispatch_groups=dispatch_groups,
+                            today=date.today().isoformat())
+
+
+@app.route('/dispatch/<int:dispatch_id>/delete', methods=['POST'])
+@role_required('admin')
+def delete_dispatch(dispatch_id):
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT * FROM dispatches WHERE id=%s FOR UPDATE", (dispatch_id,))
+            d = cur.fetchone()
+            if not d:
+                db.rollback()
+                flash('Dispatch not found.', 'error')
+                return redirect(url_for('dispatch'))
+
+            cur.execute("SELECT current_stock FROM finished_products WHERE id=%s FOR UPDATE",
+                        (d['finished_product_id'],))
+            fp = cur.fetchone()
+            if fp:
+                new_stock = float(fp['current_stock']) + float(d['qty_dispatched'])
+                cur.execute("UPDATE finished_products SET current_stock=%s WHERE id=%s",
+                            (new_stock, d['finished_product_id']))
+
+            cur.execute("""DELETE FROM stock_ledger WHERE item_type='finished_product'
+                            AND reference_type='dispatch' AND reference_id=%s""", (dispatch_id,))
+            cur.execute("DELETE FROM dispatches WHERE id=%s", (dispatch_id,))
+        db.commit()
+        flash('Dispatch deleted and stock added back.', 'success')
+    finally:
+        db.close()
+    return redirect(url_for('dispatch'))
 
 
 # ---------------------------------------------------------------------

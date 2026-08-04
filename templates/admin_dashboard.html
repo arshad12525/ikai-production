@@ -67,6 +67,7 @@ tr:last-child td{border-bottom:none;}
       <a href="{{ url_for('receive') }}">Receive Stock</a>
       <a href="{{ url_for('qc') }}">Quality Check</a>
       <a href="{{ url_for('production') }}">Production</a>
+      <a href="{{ url_for('dispatch') }}">Dispatch</a>
       <a href="{{ url_for('stock_ledger') }}">Stock Ledger</a>
     </nav>
     <div class="userbox">
@@ -79,7 +80,7 @@ tr:last-child td{border-bottom:none;}
     <div class="pagehead">
       <div>
         <h1>Dashboard</h1>
-        <p>Overview of raw materials, quality checks and production.</p>
+        <p>Overview of raw materials, quality checks, production and dispatch.</p>
       </div>
     </div>
 
@@ -103,6 +104,7 @@ tr:last-child td{border-bottom:none;}
         <div class="step"><div class="n">02</div><div class="t">Receive with batch no.</div></div>
         <div class="step"><div class="n">03</div><div class="t">Quality check pass/fail</div></div>
         <div class="step"><div class="n">04</div><div class="t">Production auto-deducts stock</div></div>
+        <div class="step"><div class="n">05</div><div class="t">Dispatch to customer</div></div>
       </div>
     </div>
 
@@ -143,6 +145,25 @@ tr:last-child td{border-bottom:none;}
         <div class="empty">All raw materials are above reorder level.</div>
         {% endif %}
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent Dispatches</h2>
+      {% if recent_dispatches %}
+      <table>
+        <tr><th>Product</th><th>Qty</th><th>Customer</th><th>Date</th></tr>
+        {% for d in recent_dispatches %}
+        <tr>
+          <td>{{ d.product_name }}</td>
+          <td>{{ d.qty_dispatched }} {{ d.unit }}</td>
+          <td>{{ d.customer_name }}</td>
+          <td>{{ d.dispatch_date }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="empty">No dispatches recorded yet.</div>
+      {% endif %}
     </div>
   </div>
 </div>

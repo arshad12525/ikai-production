@@ -72,12 +72,13 @@ tr:last-child td{border-bottom:none;}
     {% set links_admin = [
         ('admin_dashboard','Dashboard'), ('vendors','Vendors'), ('raw_materials','Raw Materials'),
         ('finished_products','Finished Products'), ('bom','Recipes (BOM)'), ('orders','Orders'),
-        ('receive','Receive Stock'), ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+        ('receive','Receive Stock'), ('qc','Quality Check'), ('production','Production'),
+        ('dispatch','Dispatch'), ('stock_ledger','Stock Ledger')
       ] %}
       {% set links_store = [
         ('warehouse_dashboard','Dashboard'), ('raw_materials','Raw Materials'), ('bom','Recipes (BOM)'),
         ('orders','Orders'), ('receive','Receive Stock'),
-        ('qc','Quality Check'), ('production','Production'), ('stock_ledger','Stock Ledger')
+        ('qc','Quality Check'), ('production','Production'), ('dispatch','Dispatch'), ('stock_ledger','Stock Ledger')
       ] %}
       {% set nav_links = links_admin if session.role == 'admin' else links_store %}
       {% for endpoint, label in nav_links %}
@@ -95,7 +96,7 @@ tr:last-child td{border-bottom:none;}
     <div class="pagehead">
       <div>
         <h1>Dashboard</h1>
-        <p>Your daily tasks — orders, receiving, quality checks and production.</p>
+        <p>Your daily tasks — orders, receiving, quality checks, production and dispatch.</p>
       </div>
     </div>
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -117,6 +118,7 @@ tr:last-child td{border-bottom:none;}
           <a class="btn accent" href="{{ url_for('receive') }}">+ Receive stock</a>
           <a class="btn accent" href="{{ url_for('qc') }}">Run quality check</a>
           <a class="btn accent" href="{{ url_for('production') }}">+ Log production</a>
+          <a class="btn accent" href="{{ url_for('dispatch') }}">+ Log dispatch</a>
         </div>
       </div>
       <div class="card">
