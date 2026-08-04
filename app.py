@@ -406,11 +406,37 @@ def adjust_raw_material_stock(material_id):
             new_balance = cur.fetchone()['current_stock']
 
             remarks = reason or ('Manual stock addition' if direction == 'in' else 'Manual stock removal')
+
+            receipt_id = None
+            if direction == 'in':
+                # Manual "+In" additions bypass the Orders -> Receive -> QC flow,
+                # so production can't see this stock unless we also create a
+                # matching receipt row. Use (or create) a placeholder vendor to
+                # satisfy the vendor_id FK, and mark it pre-passed since there's
+                # no physical batch to QC-check.
+                cur.execute("SELECT id FROM vendors WHERE name='Internal / Manual Adjustment' LIMIT 1")
+                internal_vendor = cur.fetchone()
+                if internal_vendor:
+                    internal_vendor_id = internal_vendor['id']
+                else:
+                    cur.execute("""INSERT INTO vendors (name, contact_person, phone, email, address)
+                                    VALUES ('Internal / Manual Adjustment', '', '', '', '')""")
+                    internal_vendor_id = cur.lastrowid
+
+                batch_no = f"ADJ-{material_id}-{uuid.uuid4().hex[:8].upper()}"
+                cur.execute("""INSERT INTO raw_material_receipts
+                                (receipt_group_id, order_id, raw_material_id, vendor_id, batch_no,
+                                 qty_received, received_date, qc_status, received_by)
+                                VALUES (%s, NULL, %s, %s, %s, %s, CURDATE(), 'passed', %s)""",
+                            (uuid.uuid4().hex, material_id, internal_vendor_id, batch_no, qty,
+                             session['user_id']))
+                receipt_id = cur.lastrowid
+
             cur.execute("""INSERT INTO stock_ledger
                             (item_type, item_id, transaction_type, qty, reference_type, reference_id,
                              balance_after, remarks, created_by)
-                            VALUES ('raw_material', %s, %s, %s, 'manual_adjustment', NULL, %s, %s, %s)""",
-                        (material_id, direction, qty, new_balance, remarks, session['user_id']))
+                            VALUES ('raw_material', %s, %s, %s, 'manual_adjustment', %s, %s, %s, %s)""",
+                        (material_id, direction, qty, receipt_id, new_balance, remarks, session['user_id']))
         db.commit()
         verb = 'added to' if direction == 'in' else 'removed from'
         flash(f"{qty} {material['unit']} {verb} {material['name']}.", 'success')
