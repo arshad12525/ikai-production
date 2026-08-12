@@ -897,10 +897,6 @@ def production():
             notes = request.form.get('notes', '')
 
             with db.cursor() as cur:
-                cur.execute("SELECT id FROM production_batches WHERE batch_code=%s", (batch_code,))
-                if cur.fetchone():
-                    flash(f'Batch code "{batch_code}" is already used. Enter a unique batch code.', 'error')
-                    return redirect(url_for('production'))
                 cur.execute("SELECT * FROM bom WHERE finished_product_id=%s", (fp_id,))
                 bom_rows = cur.fetchall()
                 if not bom_rows:
