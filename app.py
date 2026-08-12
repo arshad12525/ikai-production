@@ -879,6 +879,12 @@ def qc():
 
 # ---------------------------------------------------------------------
 # Production (auto-deducts raw materials based on BOM, FIFO across batches)
+#   Supports logging MULTIPLE products in one submission (one shared
+#   production date + optional shared batch code, or a distinct batch
+#   code per product). Everything in a submission is validated together
+#   first — if any single product would run short on raw material, the
+#   whole submission is rejected and nothing is saved, so you never end
+#   up with a half-saved group.
 # ---------------------------------------------------------------------
 @app.route('/production', methods=['GET', 'POST'])
 @role_required('admin', 'store')
@@ -890,84 +896,140 @@ def production():
             products = cur.fetchall()
 
         if request.method == 'POST':
-            fp_id = int(request.form['finished_product_id'])
-            qty_produced = float(request.form['qty_produced'])
-            batch_code = request.form['batch_code'].strip()
             production_date = request.form['production_date']
             notes = request.form.get('notes', '')
+            fp_ids = request.form.getlist('finished_product_id[]')
+            qtys = request.form.getlist('qty_produced[]')
+            batch_codes = request.form.getlist('batch_code[]')
 
-            with db.cursor() as cur:
-                cur.execute("SELECT * FROM bom WHERE finished_product_id=%s", (fp_id,))
-                bom_rows = cur.fetchall()
-                if not bom_rows:
-                    flash('No recipe (BOM) has been set up for this product yet.', 'error')
-                    return redirect(url_for('production'))
+            items = []
+            for fpid, qty, bcode in zip(fp_ids, qtys, batch_codes):
+                if not fpid or not qty or not bcode.strip():
+                    continue
+                qty_f = float(qty)
+                if qty_f <= 0:
+                    continue
+                items.append({
+                    'finished_product_id': int(fpid),
+                    'qty_produced': qty_f,
+                    'batch_code': bcode.strip(),
+                })
+
+            if not items:
+                flash('Add at least one product with a valid quantity and batch code.', 'error')
+                return redirect(url_for('production'))
 
             try:
                 with db.cursor() as cur:
-                    consumption_plan = []
-                    for row in bom_rows:
-                        rm_id = row['raw_material_id']
-                        needed = float(row['qty_required']) * qty_produced
-                        cur.execute("""
-                            SELECT r.id, r.batch_no,
-                                (r.qty_received - COALESCE((SELECT SUM(pc.qty_consumed) FROM production_consumption pc
-                                                             WHERE pc.raw_material_receipt_id = r.id), 0)) AS available
-                            FROM raw_material_receipts r
-                            WHERE r.raw_material_id=%s AND r.qc_status='passed'
-                            ORDER BY r.received_date ASC, r.id ASC
-                        """, (rm_id,))
-                        receipts = cur.fetchall()
-                        remaining = needed
-                        for r in receipts:
-                            if remaining <= 0:
-                                break
-                            avail = float(r['available'])
-                            if avail <= 0:
-                                continue
-                            take = min(avail, remaining)
-                            consumption_plan.append((rm_id, r['id'], take))
-                            remaining -= take
-                        if remaining > 0.0001:
-                            cur.execute("SELECT name, unit FROM raw_materials WHERE id=%s", (rm_id,))
-                            m = cur.fetchone()
-                            raise ValueError(f"Not enough {m['name']} in stock. Short by {remaining:.3f} {m['unit']}.")
+                    # Pre-validate: every product in this submission needs a BOM.
+                    for item in items:
+                        cur.execute("SELECT * FROM bom WHERE finished_product_id=%s",
+                                    (item['finished_product_id'],))
+                        bom_rows = cur.fetchall()
+                        if not bom_rows:
+                            cur.execute("SELECT name FROM finished_products WHERE id=%s",
+                                        (item['finished_product_id'],))
+                            p = cur.fetchone()
+                            raise ValueError(
+                                f"No recipe (BOM) has been set up for "
+                                f"{p['name'] if p else 'this product'} yet.")
+                        item['bom_rows'] = bom_rows
 
-                    cur.execute("""INSERT INTO production_batches
-                                    (batch_code, finished_product_id, qty_produced, production_date, produced_by, notes)
-                                    VALUES (%s,%s,%s,%s,%s,%s)""",
-                                (batch_code, fp_id, qty_produced, production_date, session['user_id'], notes))
-                    production_batch_id = cur.lastrowid
+                    # Build one combined consumption plan across ALL items in this
+                    # submission, tracking running availability per raw material so
+                    # two products needing the same material don't double-spend the
+                    # same receipt batch.
+                    availability_cache = {}  # raw_material_id -> [{id, available}, ...]
+                    consumption_plan = []    # (item_index, rm_id, receipt_id, take)
+
+                    for idx, item in enumerate(items):
+                        for row in item['bom_rows']:
+                            rm_id = row['raw_material_id']
+                            needed = float(row['qty_required']) * item['qty_produced']
+
+                            if rm_id not in availability_cache:
+                                cur.execute("""
+                                    SELECT r.id,
+                                        (r.qty_received - COALESCE((SELECT SUM(pc.qty_consumed)
+                                            FROM production_consumption pc
+                                            WHERE pc.raw_material_receipt_id = r.id), 0)) AS available
+                                    FROM raw_material_receipts r
+                                    WHERE r.raw_material_id=%s AND r.qc_status='passed'
+                                    ORDER BY r.received_date ASC, r.id ASC
+                                """, (rm_id,))
+                                availability_cache[rm_id] = [
+                                    {'id': r['id'], 'available': float(r['available'])} for r in cur.fetchall()
+                                ]
+
+                            remaining = needed
+                            for r in availability_cache[rm_id]:
+                                if remaining <= 0:
+                                    break
+                                if r['available'] <= 0:
+                                    continue
+                                take = min(r['available'], remaining)
+                                consumption_plan.append((idx, rm_id, r['id'], take))
+                                r['available'] -= take
+                                remaining -= take
+
+                            if remaining > 0.0001:
+                                cur.execute("SELECT name, unit FROM raw_materials WHERE id=%s", (rm_id,))
+                                m = cur.fetchone()
+                                raise ValueError(
+                                    f"Not enough {m['name']} in stock for batch "
+                                    f"\"{item['batch_code']}\". Short by {remaining:.3f} {m['unit']}.")
+
+                    # Everything validated across the whole submission — now insert.
+                    group_id = uuid.uuid4().hex
+                    batch_ids = []
+                    for item in items:
+                        cur.execute("""INSERT INTO production_batches
+                                        (production_group_id, batch_code, finished_product_id, qty_produced,
+                                         production_date, produced_by, notes)
+                                        VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                                    (group_id, item['batch_code'], item['finished_product_id'],
+                                     item['qty_produced'], production_date, session['user_id'], notes))
+                        batch_ids.append(cur.lastrowid)
 
                     material_totals = {}
-                    for rm_id, receipt_id, take in consumption_plan:
+                    for idx, rm_id, receipt_id, take in consumption_plan:
+                        production_batch_id = batch_ids[idx]
                         cur.execute("""INSERT INTO production_consumption
                                         (production_batch_id, raw_material_id, raw_material_receipt_id, qty_consumed)
                                         VALUES (%s,%s,%s,%s)""", (production_batch_id, rm_id, receipt_id, take))
-                        material_totals[rm_id] = material_totals.get(rm_id, 0) + take
+                        key = (idx, rm_id)
+                        material_totals[key] = material_totals.get(key, 0) + take
 
-                    for rm_id, total_take in material_totals.items():
+                    for (idx, rm_id), total_take in material_totals.items():
+                        production_batch_id = batch_ids[idx]
+                        batch_code = items[idx]['batch_code']
                         cur.execute("UPDATE raw_materials SET current_stock = current_stock - %s WHERE id=%s",
                                     (total_take, rm_id))
                         cur.execute("SELECT current_stock FROM raw_materials WHERE id=%s", (rm_id,))
                         bal = cur.fetchone()['current_stock']
                         cur.execute("""INSERT INTO stock_ledger
-                                        (item_type, item_id, transaction_type, qty, reference_type, reference_id, balance_after, remarks, created_by)
+                                        (item_type, item_id, transaction_type, qty, reference_type, reference_id,
+                                         balance_after, remarks, created_by)
                                         VALUES ('raw_material', %s, 'out', %s, 'production_consumption', %s, %s, %s, %s)""",
                                     (rm_id, total_take, production_batch_id, bal, f"Used in batch {batch_code}",
                                      session['user_id']))
 
-                    cur.execute("UPDATE finished_products SET current_stock = current_stock + %s WHERE id=%s",
-                                (qty_produced, fp_id))
-                    cur.execute("SELECT current_stock FROM finished_products WHERE id=%s", (fp_id,))
-                    fp_bal = cur.fetchone()['current_stock']
-                    cur.execute("""INSERT INTO stock_ledger
-                                    (item_type, item_id, transaction_type, qty, reference_type, reference_id, balance_after, remarks, created_by)
-                                    VALUES ('finished_product', %s, 'in', %s, 'production_output', %s, %s, %s, %s)""",
-                                (fp_id, qty_produced, production_batch_id, fp_bal, f"Batch {batch_code} produced",
-                                 session['user_id']))
+                    for idx, item in enumerate(items):
+                        production_batch_id = batch_ids[idx]
+                        cur.execute("UPDATE finished_products SET current_stock = current_stock + %s WHERE id=%s",
+                                    (item['qty_produced'], item['finished_product_id']))
+                        cur.execute("SELECT current_stock FROM finished_products WHERE id=%s",
+                                    (item['finished_product_id'],))
+                        fp_bal = cur.fetchone()['current_stock']
+                        cur.execute("""INSERT INTO stock_ledger
+                                        (item_type, item_id, transaction_type, qty, reference_type, reference_id,
+                                         balance_after, remarks, created_by)
+                                        VALUES ('finished_product', %s, 'in', %s, 'production_output', %s, %s, %s, %s)""",
+                                    (item['finished_product_id'], item['qty_produced'], production_batch_id, fp_bal,
+                                     f"Batch {item['batch_code']} produced", session['user_id']))
                 db.commit()
-                flash(f'Production batch "{batch_code}" recorded. Raw materials deducted automatically.', 'success')
+                flash(f'{len(items)} production batch(es) recorded. Raw materials deducted automatically.',
+                      'success')
             except ValueError as e:
                 db.rollback()
                 flash(str(e), 'error')
@@ -1003,6 +1065,116 @@ def production_trace(batch_id):
     finally:
         db.close()
     return render_template('trace.html', batch=batch, consumption=consumption)
+
+
+# ---------------------------------------------------------------------
+# Add this route right after production_trace()
+# Lets an admin fix a typo in a batch code without touching stock —
+# this is a pure label change with zero effect on raw material or
+# finished product quantities, so it's safe with no extra checks.
+# ---------------------------------------------------------------------
+@app.route('/production/<int:batch_id>/edit-batch-code', methods=['POST'])
+@role_required('admin')
+def edit_production_batch_code(batch_id):
+    new_code = request.form.get('batch_code', '').strip()
+    if not new_code:
+        flash('Batch code cannot be empty.', 'error')
+        return redirect(url_for('production_trace', batch_id=batch_id))
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT * FROM production_batches WHERE id=%s FOR UPDATE", (batch_id,))
+            batch = cur.fetchone()
+            if not batch:
+                db.rollback()
+                flash('Production batch not found.', 'error')
+                return redirect(url_for('production'))
+
+            old_code = batch['batch_code']
+            cur.execute("UPDATE production_batches SET batch_code=%s WHERE id=%s", (new_code, batch_id))
+        db.commit()
+        flash(f'Batch code updated from "{old_code}" to "{new_code}".', 'success')
+    finally:
+        db.close()
+    return redirect(url_for('production_trace', batch_id=batch_id))
+
+
+# ---------------------------------------------------------------------
+# Add this route right after edit_production_batch_code()
+# For mistakes bigger than a batch-code typo (wrong product, wrong
+# quantity): reverses everything this production batch did — adds the
+# consumed raw material back to stock, removes the consumption records,
+# subtracts the finished product it created, and removes the related
+# ledger entries — then deletes the batch itself. The admin re-enters
+# the batch correctly afterward via the normal Production form.
+# ---------------------------------------------------------------------
+@app.route('/production/<int:batch_id>/delete', methods=['POST'])
+@role_required('admin')
+def delete_production_batch(batch_id):
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT * FROM production_batches WHERE id=%s FOR UPDATE", (batch_id,))
+            batch = cur.fetchone()
+            if not batch:
+                db.rollback()
+                flash('Production batch not found.', 'error')
+                return redirect(url_for('production'))
+
+            # Guard: if reversing this batch would push finished product stock
+            # negative (because some of it was already dispatched to a
+            # customer), block the delete instead of corrupting stock.
+            cur.execute("SELECT current_stock, name, unit FROM finished_products WHERE id=%s FOR UPDATE",
+                        (batch['finished_product_id'],))
+            fp = cur.fetchone()
+            if fp and float(fp['current_stock']) < float(batch['qty_produced']):
+                db.rollback()
+                flash(f'Cannot delete this batch \u2014 some of "{fp["name"]}" from this batch has '
+                      f'already been dispatched. Only {fp["current_stock"]} {fp["unit"]} remains in stock, '
+                      f'but this batch produced {batch["qty_produced"]} {fp["unit"]}.', 'error')
+                return redirect(url_for('production_trace', batch_id=batch_id))
+
+            # Reverse raw material consumption: add each consumed qty back
+            # onto the raw material's current_stock.
+            cur.execute("""SELECT raw_material_id, SUM(qty_consumed) AS total_consumed
+                            FROM production_consumption
+                            WHERE production_batch_id=%s
+                            GROUP BY raw_material_id""", (batch_id,))
+            consumption_totals = cur.fetchall()
+
+            for row in consumption_totals:
+                cur.execute("SELECT current_stock FROM raw_materials WHERE id=%s FOR UPDATE",
+                            (row['raw_material_id'],))
+                rm = cur.fetchone()
+                if rm:
+                    new_stock = float(rm['current_stock']) + float(row['total_consumed'])
+                    cur.execute("UPDATE raw_materials SET current_stock=%s WHERE id=%s",
+                                (new_stock, row['raw_material_id']))
+
+            # Remove consumption rows
+            cur.execute("DELETE FROM production_consumption WHERE production_batch_id=%s", (batch_id,))
+
+            # Reverse finished product addition
+            if fp:
+                new_fp_stock = float(fp['current_stock']) - float(batch['qty_produced'])
+                cur.execute("UPDATE finished_products SET current_stock=%s WHERE id=%s",
+                            (new_fp_stock, batch['finished_product_id']))
+
+            # Remove ledger entries tied to this batch (both the raw material
+            # 'out' entries and the finished product 'in' entry)
+            cur.execute("""DELETE FROM stock_ledger WHERE item_type='raw_material'
+                            AND reference_type='production_consumption' AND reference_id=%s""", (batch_id,))
+            cur.execute("""DELETE FROM stock_ledger WHERE item_type='finished_product'
+                            AND reference_type='production_output' AND reference_id=%s""", (batch_id,))
+
+            cur.execute("DELETE FROM production_batches WHERE id=%s", (batch_id,))
+        db.commit()
+        flash(f'Production batch "{batch["batch_code"]}" deleted and stock reversed. '
+              f'You can now re-enter it correctly.', 'success')
+    finally:
+        db.close()
+    return redirect(url_for('production'))
 
 
 # ---------------------------------------------------------------------
