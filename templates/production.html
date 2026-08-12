@@ -70,6 +70,10 @@ tr:last-child td{border-bottom:none;}
 .combo-option:hover,.combo-option.highlighted{background:var(--panel-alt);}
 .combo-option.no-match{color:var(--muted);cursor:default;font-style:italic;}
 .combo-option.no-match:hover{background:transparent;}
+
+.production-item-row{border:1px solid var(--border);border-radius:7px;padding:14px;margin-bottom:12px;position:relative;background:var(--panel-alt);}
+.remove-item-btn{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;}
+.link-btn{background:none;border:none;color:var(--danger);cursor:pointer;text-decoration:underline;padding:0;font-size:13px;font-family:inherit;}
 </style>
 </head>
 <body>
@@ -101,7 +105,7 @@ tr:last-child td{border-bottom:none;}
   </div>
   <div class="main">
     <div class="pagehead">
-      <div><h1>Production</h1><p>Log a production run. Raw materials are deducted automatically based on the product's recipe.</p></div>
+      <div><h1>Production</h1><p>Log one or more production batches. Raw materials are deducted automatically based on each product's recipe.</p></div>
     </div>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
@@ -112,22 +116,25 @@ tr:last-child td{border-bottom:none;}
     <div class="grid-2">
       <div class="card">
         <h2>Log Production</h2>
-        <form method="POST">
-          <div class="field"><label>Finished Product</label>
-            <div class="combo" id="fp-combo">
-              <input type="text" class="combo-input" id="fp-search" placeholder="Type to search a product…" autocomplete="off" required>
-              <input type="hidden" name="finished_product_id" id="fp-hidden">
-              <div class="combo-list" id="fp-list">
-                {% for p in products %}<div class="combo-option" data-id="{{ p.id }}" data-name="{{ p.name }}">{{ p.name }}</div>{% endfor %}
-              </div>
-            </div>
-          </div>
-          <div class="field"><label>Quantity Produced</label><input type="number" step="0.001" name="qty_produced" required></div>
-          <div class="field"><label>Batch Code</label><input type="text" name="batch_code" placeholder="e.g. DAL-2026-0091" required></div>
+        <form method="POST" id="production-form">
           <div class="field"><label>Production Date</label><input type="date" name="production_date" value="{{ today }}" required></div>
-          <div class="field"><label>Notes (optional)</label><textarea name="notes" rows="2"></textarea></div>
-          <div class="hint">Make sure this product's recipe is set up first under Recipes (BOM), and enough raw material has passed QC.</div>
-          <br><button class="btn accent" type="submit">Save Production Batch</button>
+
+          <div class="field" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="same-batch-toggle" style="width:auto;">
+            <label style="margin:0;text-transform:none;font-weight:600;color:var(--ink);" for="same-batch-toggle">Use one batch code for all products below</label>
+          </div>
+          <div class="field" id="shared-batch-field" style="display:none;">
+            <label>Shared Batch Code</label>
+            <input type="text" id="shared-batch-code" placeholder="e.g. DAL-2026-0091">
+          </div>
+
+          <div id="production-items"></div>
+
+          <button type="button" class="btn small" id="add-item-btn" style="margin-bottom:14px;">+ Add Product</button>
+
+          <div class="field"><label>Notes (optional, applies to all items above)</label><textarea name="notes" rows="2"></textarea></div>
+          <div class="hint">Make sure each product's recipe is set up first under Recipes (BOM), and enough raw material has passed QC.</div>
+          <br><button class="btn accent" type="submit">Save Production Batch(es)</button>
         </form>
       </div>
       <div class="card">
@@ -139,7 +146,16 @@ tr:last-child td{border-bottom:none;}
           <tr>
             <td>{{ p.batch_code }}</td><td>{{ p.product_name }}</td>
             <td>{{ p.qty_produced }} {{ p.unit }}</td><td>{{ p.production_date }}</td>
-            <td><a href="{{ url_for('production_trace', batch_id=p.id) }}">Trace</a></td>
+            <td>
+              <a href="{{ url_for('production_trace', batch_id=p.id) }}">Trace</a>
+              {% if session.role == 'admin' %}
+              &nbsp;|&nbsp;
+              <form method="POST" action="{{ url_for('delete_production_batch', batch_id=p.id) }}" style="display:inline;"
+                    onsubmit="return confirm('Delete this production batch and reverse its stock effects? This cannot be undone.');">
+                <button type="submit" class="link-btn">Delete</button>
+              </form>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </table>
@@ -149,96 +165,172 @@ tr:last-child td{border-bottom:none;}
 
   </div>
 </div>
+
+<!-- Row template, cloned by JS for each product line -->
+<template id="production-item-template">
+  <div class="production-item-row">
+    <button type="button" class="remove-item-btn" title="Remove this product">&times;</button>
+    <div class="field"><label>Finished Product</label>
+      <div class="combo item-fp-combo">
+        <input type="text" class="combo-input item-fp-search" placeholder="Type to search a product…" autocomplete="off" required>
+        <input type="hidden" name="finished_product_id[]" class="item-fp-hidden">
+        <div class="combo-list item-fp-list">
+          {% for p in products %}<div class="combo-option" data-id="{{ p.id }}" data-name="{{ p.name }}">{{ p.name }}</div>{% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="field"><label>Quantity Produced</label><input type="number" step="0.001" name="qty_produced[]" required></div>
+    <div class="field item-batch-field"><label>Batch Code</label><input type="text" name="batch_code[]" placeholder="e.g. DAL-2026-0091" required></div>
+  </div>
+</template>
+
 <script>
 (function(){
-  var wrap = document.getElementById('fp-combo');
-  var input = document.getElementById('fp-search');
-  var hidden = document.getElementById('fp-hidden');
-  var list = document.getElementById('fp-list');
-  var options = Array.prototype.slice.call(list.querySelectorAll('.combo-option'));
-  var highlighted = -1;
+  var itemsContainer = document.getElementById('production-items');
+  var template = document.getElementById('production-item-template');
+  var addBtn = document.getElementById('add-item-btn');
+  var sameBatchToggle = document.getElementById('same-batch-toggle');
+  var sharedBatchField = document.getElementById('shared-batch-field');
+  var sharedBatchInput = document.getElementById('shared-batch-code');
 
-  function showAll(){
-    options.forEach(function(opt){ opt.style.display = ''; opt.classList.remove('highlighted'); });
-    var noMatchEl = list.querySelector('.no-match');
-    if (noMatchEl) noMatchEl.remove();
-    highlighted = -1;
-    list.classList.add('open');
-  }
-  function hideList(){ list.classList.remove('open'); highlighted = -1; }
-
-  function filter(){
-    var q = input.value.trim().toLowerCase();
-    var visible = [];
-    options.forEach(function(opt){
-      var match = opt.dataset.name.toLowerCase().indexOf(q) !== -1;
-      opt.style.display = match ? '' : 'none';
-      opt.classList.remove('highlighted');
-      if (match) visible.push(opt);
+  function applySharedMode(){
+    var isShared = sameBatchToggle.checked;
+    sharedBatchField.style.display = isShared ? '' : 'none';
+    sharedBatchInput.required = isShared;
+    document.querySelectorAll('.item-batch-field').forEach(function(field){
+      field.style.display = isShared ? 'none' : '';
+      var input = field.querySelector('input[name="batch_code[]"]');
+      input.required = !isShared;
     });
-    highlighted = -1;
-    var noMatchEl = list.querySelector('.no-match');
-    if (visible.length === 0) {
-      if (!noMatchEl) {
-        noMatchEl = document.createElement('div');
-        noMatchEl.className = 'combo-option no-match';
-        noMatchEl.textContent = 'No matching product';
-        list.appendChild(noMatchEl);
-      }
-    } else if (noMatchEl) {
-      noMatchEl.remove();
+  }
+  sameBatchToggle.addEventListener('change', applySharedMode);
+
+  function wireCombo(row){
+    var wrap = row.querySelector('.item-fp-combo');
+    var input = row.querySelector('.item-fp-search');
+    var hidden = row.querySelector('.item-fp-hidden');
+    var list = row.querySelector('.item-fp-list');
+    var options = Array.prototype.slice.call(list.querySelectorAll('.combo-option'));
+    var highlighted = -1;
+
+    function showAll(){
+      options.forEach(function(opt){ opt.style.display = ''; opt.classList.remove('highlighted'); });
+      var noMatchEl = list.querySelector('.no-match');
+      if (noMatchEl) noMatchEl.remove();
+      highlighted = -1;
+      list.classList.add('open');
     }
-    list.classList.add('open');
-  }
+    function hideList(){ list.classList.remove('open'); highlighted = -1; }
 
-  function selectOption(opt){
-    input.value = opt.dataset.name;
-    hidden.value = opt.dataset.id;
-    hideList();
-  }
+    function filter(){
+      var q = input.value.trim().toLowerCase();
+      var visible = [];
+      options.forEach(function(opt){
+        var match = opt.dataset.name.toLowerCase().indexOf(q) !== -1;
+        opt.style.display = match ? '' : 'none';
+        opt.classList.remove('highlighted');
+        if (match) visible.push(opt);
+      });
+      highlighted = -1;
+      var noMatchEl = list.querySelector('.no-match');
+      if (visible.length === 0) {
+        if (!noMatchEl) {
+          noMatchEl = document.createElement('div');
+          noMatchEl.className = 'combo-option no-match';
+          noMatchEl.textContent = 'No matching product';
+          list.appendChild(noMatchEl);
+        }
+      } else if (noMatchEl) {
+        noMatchEl.remove();
+      }
+      list.classList.add('open');
+    }
 
-  input.addEventListener('focus', function(){
-    showAll();
-    input.select();
-  });
-  input.addEventListener('input', function(){ hidden.value = ''; filter(); });
-
-  list.addEventListener('click', function(e){
-    var opt = e.target.closest('.combo-option');
-    if (opt && !opt.classList.contains('no-match')) selectOption(opt);
-  });
-
-  input.addEventListener('keydown', function(e){
-    var visible = options.filter(function(o){ return o.style.display !== 'none'; });
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      highlighted = Math.min(highlighted + 1, visible.length - 1);
-      visible.forEach(function(o, i){ o.classList.toggle('highlighted', i === highlighted); });
-      if (visible[highlighted]) visible[highlighted].scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      highlighted = Math.max(highlighted - 1, 0);
-      visible.forEach(function(o, i){ o.classList.toggle('highlighted', i === highlighted); });
-      if (visible[highlighted]) visible[highlighted].scrollIntoView({ block: 'nearest' });
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (highlighted >= 0 && visible[highlighted]) selectOption(visible[highlighted]);
-    } else if (e.key === 'Escape') {
+    function selectOption(opt){
+      input.value = opt.dataset.name;
+      hidden.value = opt.dataset.id;
       hideList();
     }
-  });
 
-  document.addEventListener('click', function(e){
-    if (!wrap.contains(e.target)) hideList();
-  });
+    input.addEventListener('focus', function(){ showAll(); input.select(); });
+    input.addEventListener('input', function(){ hidden.value = ''; filter(); });
 
-  wrap.closest('form').addEventListener('submit', function(e){
-    if (!hidden.value) {
-      e.preventDefault();
-      input.style.borderColor = 'var(--danger)';
-      input.placeholder = 'Please pick a product from the list';
-      input.value = '';
+    list.addEventListener('click', function(e){
+      var opt = e.target.closest('.combo-option');
+      if (opt && !opt.classList.contains('no-match')) selectOption(opt);
+    });
+
+    input.addEventListener('keydown', function(e){
+      var visible = options.filter(function(o){ return o.style.display !== 'none'; });
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        highlighted = Math.min(highlighted + 1, visible.length - 1);
+        visible.forEach(function(o, i){ o.classList.toggle('highlighted', i === highlighted); });
+        if (visible[highlighted]) visible[highlighted].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        highlighted = Math.max(highlighted - 1, 0);
+        visible.forEach(function(o, i){ o.classList.toggle('highlighted', i === highlighted); });
+        if (visible[highlighted]) visible[highlighted].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (highlighted >= 0 && visible[highlighted]) selectOption(visible[highlighted]);
+      } else if (e.key === 'Escape') {
+        hideList();
+      }
+    });
+
+    document.addEventListener('click', function(e){
+      if (!wrap.contains(e.target)) hideList();
+    });
+  }
+
+  function addRow(){
+    var clone = template.content.cloneNode(true);
+    var row = clone.querySelector('.production-item-row');
+    itemsContainer.appendChild(clone);
+    wireCombo(row);
+    row.querySelector('.remove-item-btn').addEventListener('click', function(){
+      if (itemsContainer.querySelectorAll('.production-item-row').length > 1) {
+        row.remove();
+      }
+    });
+    applySharedMode(); // keep new row's batch field in sync with current toggle state
+    return row;
+  }
+
+  addBtn.addEventListener('click', addRow);
+  addRow(); // always start with one row
+
+  document.getElementById('production-form').addEventListener('submit', function(e){
+    var rows = itemsContainer.querySelectorAll('.production-item-row');
+    var missing = false;
+
+    rows.forEach(function(row){
+      var hidden = row.querySelector('.item-fp-hidden');
+      var input = row.querySelector('.item-fp-search');
+      if (!hidden.value) {
+        missing = true;
+        input.style.borderColor = 'var(--danger)';
+        input.placeholder = 'Please pick a product from the list';
+      }
+    });
+
+    if (sameBatchToggle.checked) {
+      var sharedVal = sharedBatchInput.value.trim();
+      if (!sharedVal) {
+        missing = true;
+        sharedBatchInput.style.borderColor = 'var(--danger)';
+      } else {
+        // Copy the shared code into every row's (hidden) batch_code[] input
+        // so the backend sees one batch_code per product, same as before.
+        document.querySelectorAll('input[name="batch_code[]"]').forEach(function(inp){
+          inp.value = sharedVal;
+        });
+      }
     }
+
+    if (missing) e.preventDefault();
   });
 })();
 </script>
