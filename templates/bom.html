@@ -60,6 +60,7 @@ tr:last-child td{border-bottom:none;}
 .badge.partially_received{background:#F3EEE1;color:var(--accent-dark);}
 .empty{color:var(--muted);font-size:13px;padding:20px 0;text-align:center;}
 .hint{font-size:12px;color:var(--muted);margin-top:4px;}
+.qty-note{color:var(--muted);font-size:11.5px;margin-left:4px;}
 
 /* --- Searchable combobox (shared: raw material + finished product) --- */
 .combo{position:relative;}
@@ -147,7 +148,7 @@ tr:last-child td{border-bottom:none;}
             <label>Qty required per 1 unit produced</label>
             <input type="number" step="0.0001" name="qty_required" required>
           </div>
-          <div class="hint">If this raw material is already in the recipe, saving again will update its quantity.</div>
+          <div class="hint">If this raw material is already in the recipe, saving again will update its quantity. Always enter this in the raw material's base unit shown above (e.g. Kg, Litre) — the recipe table on the right will automatically display small amounts in g / ml for readability.</div>
           <br><button class="btn accent" type="submit">Save Ingredient</button>
         </form>
       </div>
@@ -157,9 +158,20 @@ tr:last-child td{border-bottom:none;}
         <table>
           <tr><th>Raw Material</th><th>Qty / unit</th><th></th></tr>
           {% for b in bom_rows %}
+          {% set unit_lc = (b.unit or '')|lower %}
           <tr>
             <td>{{ b.material_name }}</td>
-            <td>{{ b.qty_required }} {{ b.unit }}</td>
+            <td>
+              {% if unit_lc == 'kg' and b.qty_required < 1 %}
+                {{ '%.1f'|format(b.qty_required * 1000) }} g
+                <span class="qty-note">({{ '%.4f'|format(b.qty_required) }} kg)</span>
+              {% elif unit_lc in ['litre', 'liter', 'l'] and b.qty_required < 1 %}
+                {{ '%.1f'|format(b.qty_required * 1000) }} ml
+                <span class="qty-note">({{ '%.4f'|format(b.qty_required) }} {{ b.unit }})</span>
+              {% else %}
+                {{ '%.4f'|format(b.qty_required) }} {{ b.unit }}
+              {% endif %}
+            </td>
             <td>
               <form method="POST" action="{{ url_for('bom_delete', bom_id=b.id) }}" onsubmit="return confirm('Remove this ingredient from the recipe?');">
                 <input type="hidden" name="finished_product_id" value="{{ selected_id }}">
