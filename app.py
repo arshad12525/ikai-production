@@ -5,11 +5,12 @@ from functools import wraps
 
 import pymysql
 import pymysql.cursors
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-me')
+NASHIK_SYNC_API_KEY = os.environ.get('NASHIK_SYNC_API_KEY', 'local-test-key-123')
 
 
 # ---------------------------------------------------------------------
@@ -464,6 +465,52 @@ def finished_products():
     finally:
         db.close()
     return render_template('finished_products.html', products=products)
+
+@app.route('/api/finished-products', methods=['GET'])
+def api_finished_products():
+
+    provided_key = request.headers.get('X-API-Key')
+    if provided_key != NASHIK_SYNC_API_KEY:
+        return jsonify({'status': 'error', 'message': 'Unauthorized'}), 401
+
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT fp.id, fp.sku_code, fp.name, fp.unit, fp.current_stock,
+                       sl.created_at AS last_updated_at,
+                       u.full_name AS last_updated_by
+                FROM finished_products fp
+                LEFT JOIN stock_ledger sl ON sl.id = (
+                    SELECT sl2.id FROM stock_ledger sl2
+                    WHERE sl2.item_type = 'finished_product' AND sl2.item_id = fp.id
+                    ORDER BY sl2.created_at DESC, sl2.id DESC
+                    LIMIT 1
+                )
+                LEFT JOIN users u ON u.id = sl.created_by
+                ORDER BY fp.name
+            """)
+            rows = cur.fetchall()
+    finally:
+        db.close()
+
+    products = []
+    for r in rows:
+        products.append({
+            'sku': r['sku_code'],
+            'product_name': r['name'],
+            'unit': r['unit'],
+            'stock_qty': float(r['current_stock'] or 0),
+            'last_updated_at': r['last_updated_at'].isoformat() if r['last_updated_at'] else None,
+            'last_updated_by': r['last_updated_by']
+        })
+
+    return jsonify({'status': 'success', 'products': products})
+
+
+
+
+
 
 
 # ---------------------------------------------------------------------
